@@ -30,6 +30,18 @@ function saveUsers(users) {
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
+function ensurePasswordUpdatedAt() {
+  const users = loadUsers();
+  let changed = false;
+  for (const u of users) {
+    if (!u.passwordUpdatedAt) {
+      u.passwordUpdatedAt = u.createdAt || new Date().toISOString();
+      changed = true;
+    }
+  }
+  if (changed) saveUsers(users);
+}
+
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -39,6 +51,14 @@ function requireAuth(req, res, next) {
     const token = authHeader.slice(7);
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
+
+    // Check if password was changed after token was issued
+    const users = loadUsers();
+    const user = users.find(u => u.id === decoded.id);
+    if (user && new Date(user.passwordUpdatedAt) > new Date(decoded.iat * 1000)) {
+      return res.status(401).json({ error: 'session expired', reauth: true });
+    }
+
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
@@ -54,6 +74,7 @@ function ensureUsersExist() {
   }
 }
 ensureUsersExist();
+ensurePasswordUpdatedAt();
 
 // ==================== PUBLIC ROUTES ====================
 
@@ -70,7 +91,8 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(409).json({ error: 'username already taken' });
   }
   const hash = await bcrypt.hash(password, 10);
-  const user = { id: uuidv4(), username, password: hash, role: 'user' };
+  const now = new Date().toISOString();
+  const user = { id: uuidv4(), username, password: hash, role: 'user', passwordUpdatedAt: now };
   users.push(user);
   saveUsers(users);
   const token = jwt.sign(
@@ -93,6 +115,35 @@ app.post('/api/auth/login', async (req, res) => {
     JWT_SECRET, { expiresIn: '30d' }
   );
   res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+});
+
+app.put('/api/auth/password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'current and new password required' });
+  }
+  if (newPassword.length < 4) {
+    return res.status(400).json({ error: 'password must be at least 4 characters' });
+  }
+
+  const users = loadUsers();
+  const user = users.find(u => u.id === req.user.id);
+  if (!user) return res.status(404).json({ error: 'user not found' });
+
+  const valid = await bcrypt.compare(currentPassword, user.password);
+  if (!valid) return res.status(401).json({ error: 'invalid current password' });
+
+  const now = new Date().toISOString();
+  user.password = await bcrypt.hash(newPassword, 10);
+  user.passwordUpdatedAt = now;
+  saveUsers(users);
+
+  const newToken = jwt.sign(
+    { id: user.id, username: user.username, role: user.role },
+    JWT_SECRET, { expiresIn: '30d' }
+  );
+
+  res.json({ ok: true, token: newToken });
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {

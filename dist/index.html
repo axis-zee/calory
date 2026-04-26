@@ -119,6 +119,7 @@
   <button onclick="showPage('weekly')" id="nav-weekly"><span class="icon">📊</span>Weekly</button>
   <button onclick="showPage('history')" id="nav-history"><span class="icon">📅</span>History</button>
   <button onclick="showPage('add')" id="nav-add"><span class="icon">➕</span>Add</button>
+  <button onclick="showPage('settings')" id="nav-settings"><span class="icon">⚙️</span>Settings</button>
   <button onclick="logout()" id="nav-logout"><span class="icon">🚪</span>Logout</button>
 </nav>
 
@@ -164,6 +165,19 @@
   </div>
 </div>
 
+<!-- SETTINGS -->
+<div class="page" id="page-settings">
+  <div class="page-header"><h2>Settings</h2></div>
+  <div class="card">
+    <h2 style="font-size:.95rem;margin-bottom:14px">Change Password</h2>
+    <div class="form-group"><label>Current Password</label><input id="set-current" type="password" placeholder="Current password"/></div>
+    <div class="form-group"><label>New Password</label><input id="set-new" type="password" placeholder="New password (min 4 chars)"/></div>
+    <div class="form-group"><label>Confirm New Password</label><input id="set-confirm" type="password" placeholder="Confirm new password"/></div>
+    <button class="btn btn-primary btn-block" onclick="changePassword()">Change Password</button>
+    <div id="settings-error" style="color:var(--red);font-size:.82rem;margin-top:10px;min-height:1.2em"></div>
+  </div>
+</div>
+
 <!-- MODAL: Day Detail -->
 <div class="modal-bg" id="modal-day">
   <div class="modal" style="max-width:500px">
@@ -195,7 +209,14 @@ function apiFetch(url, opts = {}) {
   if (token) headers['Authorization'] = 'Bearer ' + token;
   return fetch(url, { ...opts, headers }).then(async (res) => {
     const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return res.json();
+    if (ct.includes('application/json')) {
+      const data = await res.json();
+      if (res.status === 401 && data.reauth) {
+        logout();
+        return null;
+      }
+      return data;
+    }
     return {};
   }).catch(err => { console.error('apiFetch error:', err); return null; });
 }
@@ -219,6 +240,7 @@ function showPage(name) {
   if (name === 'dashboard') loadDashboard();
   if (name === 'weekly') loadWeekly();
   if (name === 'history') loadHistory();
+  if (name === 'settings') document.getElementById('set-current').value = '';
 }
 
 // ===================== UTILS =====================
@@ -419,6 +441,35 @@ async function addMeal() {
 
   toast('Meal added ✓');
   showPage('dashboard');
+}
+
+// ===================== PASSWORD CHANGE =====================
+async function changePassword() {
+  const current = document.getElementById('set-current').value;
+  const newPwd = document.getElementById('set-new').value;
+  const confirm = document.getElementById('set-confirm').value;
+  const errEl = document.getElementById('settings-error');
+
+  if (!current || !newPwd) { errEl.textContent = 'Both fields required'; return; }
+  if (newPwd.length < 4) { errEl.textContent = 'Password must be at least 4 characters'; return; }
+  if (newPwd !== confirm) { errEl.textContent = 'Passwords do not match'; return; }
+
+  errEl.textContent = '';
+  const res = await apiFetch('/api/auth/password', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword: current, newPassword: newPwd }),
+  });
+
+  if (!res) { errEl.textContent = 'Network error'; return; }
+  if (res.error) { errEl.textContent = res.error; return; }
+
+  // Store new token (validates immediately)
+  localStorage.setItem(TOKEN_KEY, res.token);
+  toast('Password changed ✓');
+  document.getElementById('set-current').value = '';
+  document.getElementById('set-new').value = '';
+  document.getElementById('set-confirm').value = '';
 }
 
 // ===================== INIT =====================
