@@ -1,0 +1,6 @@
+node_modules/
+calory.db
+calory.db-wal
+calory.db-shm
+*.tmp
+.env
