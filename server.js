@@ -76,6 +76,49 @@ function ensureUsersExist() {
 ensureUsersExist();
 ensurePasswordUpdatedAt();
 
+// ==================== SCHEMA MIGRATION ====================
+const schemaMigrated = DB.prepare("SELECT count(*) as c FROM sqlite_master WHERE type='table' AND name='schema_migration'").get().c > 0;
+if (!schemaMigrated) {
+  // Create v2 tables with composite PK (day_num, user_id)
+  DB.exec(`
+    CREATE TABLE _days_v2 (
+      day_num INTEGER,
+      user_id TEXT,
+      kcal REAL, protein REAL, fat REAL,
+      carbs_total REAL, fiber REAL, net_carbs REAL,
+      PRIMARY KEY (day_num, user_id)
+    )
+  `);
+  DB.exec(`
+    CREATE TABLE _meals_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_num INTEGER,
+      user_id TEXT,
+      name TEXT, grams INTEGER,
+      kcal REAL, protein REAL, fat REAL,
+      carbs_total REAL, fiber REAL, net_carbs REAL
+    )
+  `);
+
+  // Only migrate if v2 has no data
+  const v2Count = DB.prepare("SELECT count(*) as c FROM _meals_v2").get().c;
+  if (v2Count === 0) {
+    const adminUser = loadUsers().find(u => u.role === 'admin') || loadUsers()[0];
+    const uid = adminUser.id;
+    DB.prepare("INSERT INTO _days_v2 (day_num, user_id, kcal, protein, fat, carbs_total, fiber, net_carbs) SELECT day_num, @uid, kcal, protein, fat, carbs_total, fiber, net_carbs FROM days").run({ uid });
+    DB.prepare("INSERT INTO _meals_v2 (day_num, user_id, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs) SELECT day_num, @uid, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs FROM meals").run({ uid });
+    DB.exec("DROP TABLE meals");
+    DB.exec("DROP TABLE days");
+    DB.exec("ALTER TABLE _meals_v2 RENAME TO meals");
+    DB.exec("ALTER TABLE _days_v2 RENAME TO days");
+    DB.exec("INSERT INTO schema_migration VALUES ('user_id', '2026-04-26')");
+    console.log('Schema migrated: added user_id, tagged existing data with admin');
+  } else {
+    DB.exec("DROP TABLE IF EXISTS _days_v2");
+    DB.exec("DROP TABLE IF EXISTS _meals_v2");
+  }
+}
+
 // ==================== PUBLIC ROUTES ====================
 
 app.get('/health', (req, res) => res.json({ status: 'ok', app: 'calory', auth: true }));
@@ -165,62 +208,78 @@ app.get('/login', (req, res) => {
 
 app.get('/api/days', requireAuth, (req, res) => {
   const rows = DB.prepare(`
-    SELECT d.*, (SELECT COUNT(*) FROM meals m WHERE m.day_num = d.day_num AND m.grams > 0) AS item_count
-    FROM days d ORDER BY d.day_num ASC
-  `).all();
+    SELECT d.*, (SELECT COUNT(*) FROM meals m WHERE m.day_num = d.day_num AND m.user_id = d.user_id AND m.grams > 0) AS item_count
+    FROM days d WHERE d.user_id = @uid ORDER BY d.day_num ASC
+  `).all({ uid: req.user.id });
   res.json(rows);
 });
 
 app.get('/api/days/:num', requireAuth, (req, res) => {
-  const row = DB.prepare('SELECT * FROM days WHERE day_num = ?').get(req.params.num);
+  const row = DB.prepare('SELECT * FROM days WHERE day_num = ? AND user_id = ?').get(req.params.num, req.user.id);
   res.json(row || {});
 });
 
 app.post('/api/days', requireAuth, (req, res) => {
   const { day_num, kcal, protein, fat, carbs_total, fiber, net_carbs } = req.body;
   const stmt = DB.prepare(`
-    INSERT OR REPLACE INTO days (day_num, kcal, protein, fat, carbs_total, fiber, net_carbs)
-    VALUES (@day_num, @kcal, @protein, @fat, @carbs_total, @fiber, @net_carbs)
+    INSERT OR REPLACE INTO days (day_num, user_id, kcal, protein, fat, carbs_total, fiber, net_carbs)
+    VALUES (@day_num, @uid, @kcal, @protein, @fat, @carbs_total, @fiber, @net_carbs)
   `);
-  stmt.run({ day_num, kcal, protein, fat, carbs_total: carbs_total || 0, fiber, net_carbs: net_carbs || 0 });
+  stmt.run({ uid: req.user.id, day_num, kcal, protein, fat, carbs_total: carbs_total || 0, fiber, net_carbs: net_carbs || 0 });
   res.json({ ok: true });
 });
 
 app.get('/api/meals/:day', requireAuth, (req, res) => {
-  const meals = DB.prepare('SELECT * FROM meals WHERE day_num = ? ORDER BY id ASC').all(req.params.day);
+  const meals = DB.prepare('SELECT * FROM meals WHERE day_num = ? AND user_id = ? ORDER BY id ASC').all(req.params.day, req.user.id);
   res.json(meals);
 });
 
 app.post('/api/meals', requireAuth, (req, res) => {
   const { day_num, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs } = req.body;
+  const uid = req.user.id;
   const stmt = DB.prepare(`
-    INSERT INTO meals (day_num, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs)
-    VALUES (@day_num, @name, @grams, @kcal, @protein, @fat, @carbs_total, @fiber, @net_carbs)
+    INSERT INTO meals (day_num, user_id, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs)
+    VALUES (@day_num, @uid, @name, @grams, @kcal, @protein, @fat, @carbs_total, @fiber, @net_carbs)
   `);
-  stmt.run({ day_num, name, grams, kcal, protein, fat, carbs_total: carbs_total || 0, fiber: fiber || 0, net_carbs: net_carbs || 0 });
+  stmt.run({ uid, day_num, name, grams, kcal, protein, fat, carbs_total: carbs_total || 0, fiber: fiber || 0, net_carbs: net_carbs || 0 });
 
   const totals = DB.prepare(`
     SELECT COALESCE(SUM(kcal), 0) as kcal, COALESCE(SUM(protein), 0) as protein,
            COALESCE(SUM(fat), 0) as fat, COALESCE(SUM(net_carbs), 0) as net_carbs
-    FROM meals WHERE day_num = @day_num
-  `).get({ day_num });
+    FROM meals WHERE day_num = @day_num AND user_id = @uid
+  `).get({ day_num, uid });
 
-  DB.prepare('INSERT OR REPLACE INTO days (day_num, kcal, protein, fat, net_carbs) VALUES (@day_num, @kcal, @protein, @fat, @net_carbs)').run({
-    day_num, kcal: totals.kcal, protein: totals.protein, fat: totals.fat, net_carbs: totals.net_carbs
+  DB.prepare('INSERT OR REPLACE INTO days (day_num, user_id, kcal, protein, fat, net_carbs) VALUES (@day_num, @uid, @kcal, @protein, @fat, @net_carbs)').run({
+    uid, day_num, kcal: totals.kcal, protein: totals.protein, fat: totals.fat, net_carbs: totals.net_carbs
   });
 
   res.json({ ok: true });
 });
 
 app.delete('/api/meals/:id', requireAuth, (req, res) => {
+  const row = DB.prepare('SELECT * FROM meals WHERE id = ?').get(req.params.id);
+  if (!row || row.user_id !== req.user.id) return res.status(404).json({ error: 'not found' });
+  const dayNum = row.day_num;
   DB.prepare('DELETE FROM meals WHERE id = ?').run(req.params.id);
+
+  // Update day totals after deletion
+  const totals = DB.prepare(`
+    SELECT COALESCE(SUM(kcal), 0) as kcal, COALESCE(SUM(protein), 0) as protein,
+           COALESCE(SUM(fat), 0) as fat, COALESCE(SUM(net_carbs), 0) as net_carbs
+    FROM meals WHERE day_num = @day_num AND user_id = @uid
+  `).get({ day_num, uid: req.user.id });
+
+  DB.prepare('INSERT OR REPLACE INTO days (day_num, user_id, kcal, protein, fat, net_carbs) VALUES (@day_num, @uid, @kcal, @protein, @fat, @net_carbs)').run({
+    uid: req.user.id, day_num, kcal: totals.kcal, protein: totals.protein, fat: totals.fat, net_carbs: totals.net_carbs
+  });
+
   res.json({ ok: true });
 });
 
 app.get('/api/stats', requireAuth, (req, res) => {
   const last7 = DB.prepare(`
-    SELECT * FROM days WHERE kcal > 0 ORDER BY day_num DESC LIMIT 7
-  `).all();
+    SELECT * FROM days WHERE user_id = @uid AND kcal > 0 ORDER BY day_num DESC LIMIT 7
+  `).all({ uid: req.user.id });
 
   let rollingAvg = 0;
   if (last7.length > 0) {
