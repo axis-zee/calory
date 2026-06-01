@@ -1,7 +1,8 @@
-FROM sqlpage/sqlpage:latest
+FROM node:20-alpine
 WORKDIR /app
-COPY calory.db .
-RUN mkdir -p sqlpage
-COPY sqlpage/*.sqlpage sqlpage/
-EXPOSE 8080
-CMD ["--database-url", "sqlite://./calory.db", "--directory", "/app/sqlpage"]
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY server.js dist/ data/ ./
+RUN mkdir -p /app/data
+EXPOSE 4002
+CMD ["node", "server.js"]

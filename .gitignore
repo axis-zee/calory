@@ -4,3 +4,5 @@ calory.db-wal
 calory.db-shm
 *.tmp
 .env
+data/openfoodfacts.csv.gz
+data/jwt_secret.txt

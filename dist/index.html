@@ -37,6 +37,8 @@
     .btn-green{background:#052e16;color:var(--green)}.btn-green:hover{background:#14532d}
     .btn-sm{padding:6px 12px;font-size:0.78rem}
     .btn-block{width:100%;justify-content:center}
+    .btn-arrow{width:36px;height:36px;padding:0;display:flex;align-items:center;justify-content:center;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted2);font-size:1rem;cursor:pointer;transition:all .15s;flex-shrink:0}
+    .btn-arrow:hover{color:var(--text);border-color:var(--accent2)}
 
     /* FORMS */
     .form-group{margin-bottom:14px}
@@ -44,6 +46,13 @@
     input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:0.88rem;font-family:inherit}
     input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
     textarea{resize:vertical;min-height:60px}
+
+    /* DATE SELECTOR */
+    .date-selector{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:20px}
+    .date-header{text-align:center;margin-bottom:8px}
+    .date-header-text{font-size:1rem;font-weight:600;color:var(--muted2)}
+    .date-input-wrap{position:relative;display:flex;align-items:center}
+    .date-input-wrap input[type="date"]{flex:1;min-width:0;padding:8px 12px;text-align:center}
 
     /* MODALS */
     .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center;padding:16px}
@@ -57,7 +66,7 @@
     .page-header h2{font-size:1.1rem;font-weight:700}
 
     /* STATS */
-    .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+    .stats-row{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px}
     .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center}
     .stat-val{font-size:1.4rem;font-weight:700;color:var(--accent2)}
     .stat-lbl{font-size:0.68rem;color:var(--muted);text-transform:uppercase;margin-top:2px}
@@ -92,6 +101,8 @@
     .meal-grams{font-size:0.75rem;color:var(--muted);margin-left:6px}
     .meal-remove{background:none;border:none;color:var(--red);cursor:pointer;font-size:1.1rem;opacity:0.5;padding:4px}
     .meal-remove:hover{opacity:1}
+    .meal-edit{background:none;border:none;color:var(--accent2);cursor:pointer;font-size:1.1rem;opacity:0.5;padding:4px}
+    .meal-edit:hover{opacity:1}
 
     /* SUBTOTAL */
     .subtotal{padding:8px 0 4px;font-size:0.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;border-top:1px solid var(--border);margin-top:4px}
@@ -99,16 +110,8 @@
     /* EMPTY */
     .empty{text-align:center;color:var(--muted);padding:40px 16px;font-size:0.9rem}
 
-    /* TAG */
-    .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:0.7rem;font-weight:600;background:var(--surface2);color:var(--muted2);margin-right:4px}
-
     /* TOAST */
     .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);color:var(--muted2);padding:10px 18px;border-radius:8px;font-size:.82rem;z-index:999;white-space:nowrap}
-
-    /* DETAIL HEADER */
-    .detail-header{text-align:center;padding:16px 0}
-    .detail-day{font-size:1.5rem;font-weight:700}
-    .detail-kcal{font-size:2.2rem;font-weight:700;color:var(--accent2);margin:4px 0}
   </style>
 </head>
 <body id="app-body" style="display:none">
@@ -153,7 +156,16 @@
 <div class="page" id="page-add">
   <div class="page-header"><h2>Add Meal</h2></div>
   <div id="add-form">
-    <div class="form-group"><label>Day Number</label><input id="a-day" type="number" placeholder="e.g. 62"/></div>
+    <div class="date-header">
+      <div class="date-header-text" id="add-date-label">Loading date…</div>
+    </div>
+    <div class="date-selector">
+      <button class="btn-arrow" id="date-prev" title="Previous day">◀</button>
+      <div class="date-input-wrap">
+        <input id="a-date" type="date" />
+      </div>
+      <button class="btn-arrow" id="date-next" title="Next day">▶</button>
+    </div>
     <div class="form-group"><label>Food Name</label><input id="a-name" placeholder="e.g. Grilled chicken"/></div>
     <div class="form-group"><label>Weight (grams)</label><input id="a-grams" type="number" placeholder="e.g. 200"/></div>
     <div class="form-group"><label>Kcal</label><input id="a-kcal" type="number" placeholder="e.g. 350"/></div>
@@ -161,6 +173,23 @@
     <div class="form-group"><label>Fat (g)</label><input id="a-fat" type="number" placeholder="e.g. 15"/></div>
     <div class="form-group"><label>Net Carbs (g)</label><input id="a-net_carbs" type="number" placeholder="e.g. 2"/></div>
     <button class="btn btn-primary btn-block" onclick="addMeal()">+ Add Meal</button>
+  </div>
+</div>
+
+<!-- MODAL: Edit Meal -->
+<div class="modal-bg" id="modal-edit-meal">
+  <div class="modal">
+    <h2>Edit Meal</h2>
+    <div class="form-group"><label>Food Name</label><input id="e-name" placeholder="e.g. Grilled chicken"/></div>
+    <div class="form-group"><label>Weight (grams)</label><input id="e-grams" type="number" placeholder="e.g. 200"/></div>
+    <div class="form-group"><label>Kcal</label><input id="e-kcal" type="number" placeholder="e.g. 350"/></div>
+    <div class="form-group"><label>Protein (g)</label><input id="e-protein" type="number" placeholder="e.g. 40"/></div>
+    <div class="form-group"><label>Fat (g)</label><input id="e-fat" type="number" placeholder="e.g. 15"/></div>
+    <div class="form-group"><label>Net Carbs (g)</label><input id="e-net_carbs" type="number" placeholder="e.g. 2"/></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-edit-meal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMealEdit()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -174,7 +203,6 @@
 </div>
 
 <script>
-// ===================== AUTH =====================
 const TOKEN_KEY = 'calory_token';
 const USER_KEY = 'calory_user';
 
@@ -200,7 +228,7 @@ function apiFetch(url, opts = {}) {
   }).catch(err => { console.error('apiFetch error:', err); return null; });
 }
 
-// Auth guard — redirect if not logged in
+// Auth guard
 (function checkAuth() {
   if (!getToken()) {
     document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0d0f14;color:#e2e8f0;font-family:sans-serif"><div style="text-align:center"><div style="font-size:2rem">Calory Tracker</div><div style="color:#64748b;margin:16px 0">Redirecting to login…</div></div></div>';
@@ -210,20 +238,14 @@ function apiFetch(url, opts = {}) {
   document.getElementById('app-body').style.display = 'block';
 })();
 
-// ===================== NAV =====================
-function showPage(name) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + name).classList.add('active');
-  document.getElementById('nav-' + name).classList.add('active');
-  if (name === 'dashboard') loadDashboard();
-  if (name === 'weekly') loadWeekly();
-  if (name === 'history') loadHistory();
-}
+// ===================== FORMAT =====================
 
-// ===================== UTILS =====================
-function fmtDate(iso) {
-  const d = new Date(iso);
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+function formatShortDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -236,62 +258,114 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2500);
 }
 
+// Date helpers
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function formatDateLabel(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+function stepDate(dateStr, delta) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function updateAddDate(labelId, inputId, delta) {
+  const input = document.getElementById(inputId);
+  const current = input.value ? input.value : todayStr();
+  const next = stepDate(current, delta);
+  input.value = next;
+  document.getElementById(labelId).textContent = formatDateLabel(next);
+  document.getElementById('add-date-label').textContent = formatDateLabel(next);
+}
+
+// ===================== NAV =====================
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'weekly') loadWeekly();
+  if (name === 'history') loadHistory();
+  if (name === 'add') loadAddPage();
+}
+
+// ===================== ADD PAGE =====================
+function loadAddPage() {
+  const today = todayStr();
+  const input = document.getElementById('a-date');
+  const label = document.getElementById('add-date-label');
+
+  // Only set default on first visit (not on subsequent nav)
+  if (!input.dataset.initialized) {
+    input.value = today;
+    label.textContent = formatDateLabel(today);
+    input.dataset.initialized = '1';
+  }
+
+  // Arrow buttons
+  document.getElementById('date-prev').onclick = () => updateAddDate('add-date-label', 'a-date', -1);
+  document.getElementById('date-next').onclick = () => updateAddDate('add-date-label', 'a-date', 1);
+}
+
 // ===================== DASHBOARD =====================
 async function loadDashboard() {
   document.getElementById('dash-date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   const [stats, recent] = await Promise.all([
     apiFetch('/api/stats'),
-    apiFetch('/api/days').then(d => (d || []).filter(x => x.kcal > 0).sort((a,b) => b.day_num - a.day_num).slice(0,7)),
+    apiFetch('/api/days').then(d => (d || []).filter(x => x.kcal > 0).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0,7)),
   ]);
 
   document.getElementById('dash-stats').innerHTML = `
     <div class="stat-card"><div class="stat-val">${stats.daysLogged}</div><div class="stat-lbl">Days Logged</div></div>
     <div class="stat-card"><div class="stat-val green">${stats.rollingAvg || '-'}</div><div class="stat-lbl">7d Avg Kcal</div></div>
-    <div class="stat-card"><div class="stat-val yellow">${Math.round(stats.totalKcal) || '-'}</div><div class="stat-lbl">Week Kcal</div></div>
+    <div class="stat-card"><div class="stat-val orange">${stats.rollingAvgNetCarbs || '-'}</div><div class="stat-lbl">7d Avg Net C</div></div>
+    <div class="stat-card"><div class="stat-val yellow">${stats.rollingAvgProtein || '-'}</div><div class="stat-lbl">7d Avg Protein</div></div>
   `;
 
   document.getElementById('dash-recent').innerHTML = recent.length ? recent.map(d => `
-    <div class="card day-item" onclick="openDay(${d.day_num})">
+    <div class="card day-item" onclick="openDay('${d.date}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div><div class="card-title">Day ${d.day_num}</div><div class="card-sub">${d.item_count || 0} meals logged</div></div>
+        <div><div class="card-title">${formatShortDate(d.date)}</div><div class="card-sub">${d.item_count || 0} meals logged</div></div>
         <div style="text-align:right"><div style="font-size:1.2rem;font-weight:700;color:var(--accent2)">${Math.round(d.kcal)}</div><div class="card-sub">kcal</div></div>
       </div>
       <div class="day-macros">
-        <div class="day-macro"><div class="val">${d.protein || 0}g</div><div class="lbl">Protein</div></div>
-        <div class="day-macro"><div class="val">${d.fat || 0}g</div><div class="lbl">Fat</div></div>
-        <div class="day-macro"><div class="val">${d.net_carbs || 0}g</div><div class="lbl">Net C</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.protein || 0)}g</div><div class="lbl">Protein</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.fat || 0)}g</div><div class="lbl">Fat</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.net_carbs || 0)}g</div><div class="lbl">Net C</div></div>
       </div>
     </div>
-  `).join('') : '<div class="empty">No data yet. Seed diary.md or add meals manually.</div>';
+  `).join('') : '<div class="empty">No data yet.</div>';
 }
 
 // ===================== WEEKLY =====================
 async function loadWeekly() {
-  const days = await apiFetch('/api/days').then(d => (d || []).filter(x => x.kcal > 0));
+  const days = await apiFetch('/api/days').then(d => (d || []).filter(x => x.kcal > 0).sort((a,b) => new Date(a.date) - new Date(b.date)));
   if (!days.length) { document.getElementById('weekly-chart').innerHTML = '<div class="empty">No data yet.</div>'; return; }
 
   const maxKcal = Math.max(...days.map(d => d.kcal), 1);
   const colors = ['accent', 'accent', 'accent', 'yellow', 'green', 'green', 'green'];
 
-  // Bar chart
   document.getElementById('weekly-chart').innerHTML = `
     <div style="font-size:.78rem;color:var(--muted);margin-bottom:12px;font-weight:600">Calories by Day</div>
     ${days.map((d, i) => `
       <div class="bar-row">
-        <div class="bar-label">Day ${d.day_num}</div>
+        <div class="bar-label">${formatShortDate(d.date).split(' ')[0]}</div>
         <div class="bar-track"><div class="bar-fill ${colors[i % colors.length]}" style="width:${(d.kcal / maxKcal * 100).toFixed(1)}%"></div></div>
         <div class="bar-val">${Math.round(d.kcal)}</div>
       </div>
     `).join('')}
   `;
 
-  // Rolling 7-day stats
   const rolling = days.slice(-7);
   const avgKcal = Math.round(rolling.reduce((s, d) => s + d.kcal, 0) / rolling.length);
   const totalP = Math.round(rolling.reduce((s, d) => s + (d.protein || 0), 0));
   const totalF = Math.round(rolling.reduce((s, d) => s + (d.fat || 0), 0));
-  const totalC = Math.round(rolling.reduce((s, d) => s + (d.net_carbs || 0), 0) * 10) / 10;
+  const totalC = Math.round(rolling.reduce((s, d) => s + (d.net_carbs || 0), 0));
 
   document.getElementById('weekly-stats').innerHTML = `
     <div class="stat-card"><div class="stat-val">${avgKcal}</div><div class="stat-lbl">7d Avg</div></div>
@@ -299,25 +373,22 @@ async function loadWeekly() {
     <div class="stat-card"><div class="stat-val">${totalF}g</div><div class="stat-lbl">Fat</div></div>
   `;
 
-  // Rolling average for last day
   if (rolling.length >= 2) {
-    const last7 = rolling;
-    const rAvg = Math.round(last7.reduce((s, d) => s + d.kcal, 0) / last7.length);
     document.getElementById('weekly-stats').innerHTML += `
       <div class="stat-card"><div class="stat-val orange">${totalC}g</div><div class="stat-lbl">Net Carbs</div></div>
     `;
   }
 
   document.getElementById('weekly-days').innerHTML = days.map(d => `
-    <div class="card day-item" onclick="openDay(${d.day_num})">
+    <div class="card day-item" onclick="openDay('${d.date}')">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div class="card-title">Day ${d.day_num}</div>
+        <div class="card-title">${formatShortDate(d.date)}</div>
         <div style="text-align:right"><span style="font-weight:700;color:var(--accent2)">${Math.round(d.kcal)}</span> <span style="color:var(--muted);font-size:.8rem">kcal</span></div>
       </div>
       <div class="day-macros">
-        <div class="day-macro"><div class="val">${d.protein || 0}g</div><div class="lbl">Protein</div></div>
-        <div class="day-macro"><div class="val">${d.fat || 0}g</div><div class="lbl">Fat</div></div>
-        <div class="day-macro"><div class="val">${d.net_carbs || 0}g</div><div class="lbl">Net C</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.protein || 0)}g</div><div class="lbl">Protein</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.fat || 0)}g</div><div class="lbl">Fat</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.net_carbs || 0)}g</div><div class="lbl">Net C</div></div>
       </div>
     </div>
   `).join('');
@@ -328,33 +399,33 @@ async function loadHistory() {
   const days = await apiFetch('/api/days') || [];
   if (!days.length) { document.getElementById('history-list').innerHTML = '<div class="empty">No data yet.</div>'; return; }
 
-  document.getElementById('history-list').innerHTML = days.map(d => `
-    <div class="card day-item" onclick="openDay(${d.day_num})">
+  const sorted = days.sort((a, b) => new Date(a.date) - new Date(b.date));
+  document.getElementById('history-list').innerHTML = sorted.map(d => `
+    <div class="card day-item" onclick="openDay('${d.date}')">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div class="card-title">Day ${d.day_num}</div>
+        <div class="card-title">${formatDate(d.date)}</div>
         <div style="text-align:right"><span style="font-weight:700;color:var(--accent2)">${Math.round(d.kcal)}</span> <span style="color:var(--muted);font-size:.8rem">kcal</span></div>
       </div>
       <div class="day-macros">
-        <div class="day-macro"><div class="val">${d.protein || 0}g</div><div class="lbl">Protein</div></div>
-        <div class="day-macro"><div class="val">${d.fat || 0}g</div><div class="lbl">Fat</div></div>
-        <div class="day-macro"><div class="val">${d.net_carbs || 0}g</div><div class="lbl">Net C</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.protein || 0)}g</div><div class="lbl">Protein</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.fat || 0)}g</div><div class="lbl">Fat</div></div>
+        <div class="day-macro"><div class="val">${Math.round(d.net_carbs || 0)}g</div><div class="lbl">Net C</div></div>
       </div>
     </div>
   `).join('');
 }
 
 // ===================== DAY DETAIL =====================
-async function openDay(dayNum) {
+async function openDay(dateStr) {
   const [day, meals] = await Promise.all([
-    apiFetch('/api/days').then(d => (d || []).find(x => x.day_num === dayNum)),
-    apiFetch('/api/meals/' + dayNum),
+    apiFetch('/api/days').then(d => (d || []).find(x => x.date === dateStr)),
+    apiFetch('/api/meals/' + dateStr),
   ]);
   if (!day) { toast('Day not found'); return; }
 
-  document.getElementById('day-modal-title').textContent = 'Day ' + dayNum;
+  document.getElementById('day-modal-title').textContent = formatDate(dateStr);
 
   let rows = '';
-
   for (const m of meals) {
     rows += `
       <div class="meal-item">
@@ -363,12 +434,12 @@ async function openDay(dayNum) {
           <div style="text-align:right"><div class="meal-kcal">${Math.round(m.kcal)} kcal</div>
             <div style="font-size:.72rem;color:var(--muted2)">${m.protein || 0}g · ${m.fat || 0}g · ${m.net_carbs || 0}g</div>
           </div>
-          <button class="meal-remove" onclick="removeMeal(${m.id})">✕</button>
+          <button class="meal-edit" onclick="openEditMeal(${m.id}, '${m.name.replace(/'/g, "\\'")}', ${m.grams || 0}, ${m.kcal || 0}, ${m.protein || 0}, ${m.fat || 0}, ${m.net_carbs || 0})" title="Edit">✎</button>
+          <button class="meal-remove" onclick="removeMeal(${m.id})" title="Delete">✕</button>
         </div>
       </div>`;
   }
 
-  // Grand total
   rows += `
     <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -391,9 +462,44 @@ async function removeMeal(id) {
   loadDashboard();
 }
 
+let editingMealId = null;
+
+function openEditMeal(id, name, grams, kcal, protein, fat, net_carbs) {
+  editingMealId = id;
+  document.getElementById('e-name').value = name;
+  document.getElementById('e-grams').value = grams || '';
+  document.getElementById('e-kcal').value = kcal || '';
+  document.getElementById('e-protein').value = protein || '';
+  document.getElementById('e-fat').value = fat || '';
+  document.getElementById('e-net_carbs').value = net_carbs || '';
+  openModal('modal-edit-meal');
+}
+
+async function saveMealEdit() {
+  const name = document.getElementById('e-name').value.trim();
+  const grams = parseFloat(document.getElementById('e-grams').value) || 0;
+  const kcal = parseFloat(document.getElementById('e-kcal').value) || 0;
+  const protein = parseFloat(document.getElementById('e-protein').value) || 0;
+  const fat = parseFloat(document.getElementById('e-fat').value) || 0;
+  const net_carbs = parseFloat(document.getElementById('e-net_carbs').value) || 0;
+
+  if (!name) { toast('Name required'); return; }
+
+  await apiFetch('/api/meals/' + editingMealId, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, grams, kcal, protein, fat, net_carbs }),
+  });
+
+  closeModal('modal-edit-meal');
+  closeModal('modal-day');
+  toast('Meal updated ✓');
+  loadDashboard();
+}
+
 // ===================== ADD MEAL =====================
 async function addMeal() {
-  const day = parseInt(document.getElementById('a-day').value);
+  const date = document.getElementById('a-date').value;
   const name = document.getElementById('a-name').value.trim();
   const grams = parseFloat(document.getElementById('a-grams').value) || 0;
   const kcal = parseFloat(document.getElementById('a-kcal').value) || 0;
@@ -401,15 +507,14 @@ async function addMeal() {
   const fat = parseFloat(document.getElementById('a-fat').value) || 0;
   const net_carbs = parseFloat(document.getElementById('a-net_carbs').value) || 0;
 
-  if (!day || !name) { toast('Day and name required'); return; }
+  if (!date || !name) { toast('Date and name required'); return; }
 
   await apiFetch('/api/meals', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ day_num: day, name, grams, kcal, protein, fat, net_carbs }),
+    body: JSON.stringify({ date, name, grams, kcal, protein, fat, net_carbs }),
   });
 
-  document.getElementById('a-day').value = '';
   document.getElementById('a-name').value = '';
   document.getElementById('a-grams').value = '';
   document.getElementById('a-kcal').value = '';
