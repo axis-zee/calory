@@ -41,11 +41,19 @@
     .btn-arrow:hover{color:var(--text);border-color:var(--accent2)}
 
     /* FORMS */
-    .form-group{margin-bottom:14px}
+    .form-group{margin-bottom:14px;position:relative}
     label{display:block;font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
     input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;font-size:0.88rem;font-family:inherit}
     input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
     textarea{resize:vertical;min-height:60px}
+
+    /* FOOD DROPDOWN */
+    .food-suggestions{position:absolute;top:100%;left:0;right:0;background:var(--surface2);border:1px solid var(--border);border-radius:8px;max-height:240px;overflow-y:auto;z-index:200;margin-top:2px;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+    .food-item{padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s}
+    .food-item:last-child{border-bottom:none}
+    .food-item:hover,.food-item.selected{background:var(--surface);outline:1px solid var(--accent)}
+    .food-item-name{font-size:0.88rem;font-weight:500}
+    .food-item-macros{font-size:0.7rem;color:var(--muted);margin-top:2px}
 
     /* DATE SELECTOR */
     .date-selector{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:20px}
@@ -166,12 +174,12 @@
       </div>
       <button class="btn-arrow" id="date-next" title="Next day">▶</button>
     </div>
-    <div class="form-group"><label>Food Name</label><input id="a-name" placeholder="e.g. Grilled chicken"/></div>
-    <div class="form-group"><label>Weight (grams)</label><input id="a-grams" type="number" placeholder="e.g. 200"/></div>
-    <div class="form-group"><label>Kcal</label><input id="a-kcal" type="number" placeholder="e.g. 350"/></div>
-    <div class="form-group"><label>Protein (g)</label><input id="a-protein" type="number" placeholder="e.g. 40"/></div>
-    <div class="form-group"><label>Fat (g)</label><input id="a-fat" type="number" placeholder="e.g. 15"/></div>
-    <div class="form-group"><label>Net Carbs (g)</label><input id="a-net_carbs" type="number" placeholder="e.g. 2"/></div>
+    <div class="form-group"><label>Food Name</label><input id="a-name" placeholder="e.g. Grilled chicken" oninput="onFoodInput()" onblur="onFoodBlur()" autocomplete="off" /></div>
+    <div class="form-group"><label>Weight (grams)</label><input id="a-grams" type="number" placeholder="e.g. 200" oninput="recalcFromGrams()"/></div>
+    <div class="form-group"><label>Kcal</label><input id="a-kcal" type="number" placeholder="e.g. 350" /></div>
+    <div class="form-group"><label>Protein (g)</label><input id="a-protein" type="number" placeholder="e.g. 40" /></div>
+    <div class="form-group"><label>Fat (g)</label><input id="a-fat" type="number" placeholder="e.g. 15" /></div>
+    <div class="form-group"><label>Net Carbs (g)</label><input id="a-net_carbs" type="number" placeholder="e.g. 2" /></div>
     <button class="btn btn-primary btn-block" onclick="addMeal()">+ Add Meal</button>
   </div>
 </div>
@@ -180,8 +188,8 @@
 <div class="modal-bg" id="modal-edit-meal">
   <div class="modal">
     <h2>Edit Meal</h2>
-    <div class="form-group"><label>Food Name</label><input id="e-name" placeholder="e.g. Grilled chicken"/></div>
-    <div class="form-group"><label>Weight (grams)</label><input id="e-grams" type="number" placeholder="e.g. 200"/></div>
+    <div class="form-group"><label>Food Name</label><input id="e-name" placeholder="e.g. Grilled chicken" oninput="onEditFoodInput()" onblur="onEditFoodBlur()" autocomplete="off"/></div>
+    <div class="form-group"><label>Weight (grams)</label><input id="e-grams" type="number" placeholder="e.g. 200" oninput="recalcEditFromGrams()"/></div>
     <div class="form-group"><label>Kcal</label><input id="e-kcal" type="number" placeholder="e.g. 350"/></div>
     <div class="form-group"><label>Protein (g)</label><input id="e-protein" type="number" placeholder="e.g. 40"/></div>
     <div class="form-group"><label>Fat (g)</label><input id="e-fat" type="number" placeholder="e.g. 15"/></div>
@@ -205,6 +213,14 @@
 <script>
 const TOKEN_KEY = 'calory_token';
 const USER_KEY = 'calory_user';
+let foodMatches = [];
+let editFoodMatches = [];
+let originalMacros = null;
+let foodSelectedId = null;
+let foodSelectedName = null;
+let foodDropdownIdx = -1;
+let foodDebounce = null;
+let activeEditDropdown = false;
 
 function getToken() { return localStorage.getItem(TOKEN_KEY); }
 function getUser() {
@@ -222,6 +238,10 @@ function apiFetch(url, opts = {}) {
   const headers = opts.headers || {};
   if (token) headers['Authorization'] = 'Bearer ' + token;
   return fetch(url, { ...opts, headers }).then(async (res) => {
+    if (!res.ok) {
+      const r = res.headers.get('content-type')?.includes('application/json') ? await res.json() : {};
+      return { error: r.error || r.message || 'HTTP ' + res.status };
+    }
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) return res.json();
     return {};
@@ -279,6 +299,173 @@ function updateAddDate(labelId, inputId, delta) {
   input.value = next;
   document.getElementById(labelId).textContent = formatDateLabel(next);
   document.getElementById('add-date-label').textContent = formatDateLabel(next);
+}
+
+// ===================== FOOD SEARCH =====================
+
+function onFoodInput() {
+  const term = document.getElementById('a-name').value.trim();
+  document.getElementById('a-grams').value = '';
+  clearFoodDropdown();
+
+  if (!term || term.length < 2) return;
+
+  clearTimeout(foodDebounce);
+  foodDebounce = setTimeout(() => {
+    apiFetch('/api/foods?q=' + encodeURIComponent(term)).then(results => {
+      if (!results || !results.length) {
+        foodMatches = [];
+        return;
+      }
+      foodMatches = results;
+      foodSelectedId = null;
+      foodSelectedName = null;
+      originalMacros = null;
+      renderFoodDropdown('a-name');
+    });
+  }, 300);
+}
+
+function renderFoodDropdown(inputId) {
+  const input = document.getElementById(inputId);
+  let dd = document.getElementById('food-suggestions');
+  if (!dd) {
+    dd = document.createElement('div');
+    dd.id = 'food-suggestions';
+    dd.className = 'food-suggestions';
+    input.parentNode.appendChild(dd);
+  }
+
+  dd.innerHTML = '';
+  foodDropdownIdx = 0;
+
+  (inputId === 'e-name' ? editFoodMatches : foodMatches).slice(0, 20).forEach((item, i) => {
+    const div = document.createElement('div');
+    div.className = 'food-item' + (i === 0 ? ' selected' : '');
+    div.innerHTML = '<div class="food-item-name"></div><div class="food-item-macros">';
+
+    div.querySelector('.food-item-name').textContent = item.name;
+    div.querySelector('.food-item-macros').textContent =
+      Math.round(item.kcal) + ' kcal · P: ' + item.protein.toFixed(1) + 'g · F: ' + item.fat.toFixed(1) + 'g · N: ' + item.net_carbs.toFixed(1) + 'g';
+
+    div.addEventListener('click', (e) => { e.stopPropagation(); selectFood(i); });
+    div.addEventListener('mousedown', (e) => e.preventDefault());
+    dd.appendChild(div);
+  });
+}
+
+function selectFood(index) {
+  const inputId = activeEditDropdown ? 'e-name' : 'a-name';
+  const matches = activeEditDropdown ? editFoodMatches : foodMatches;
+  const macrosKey = activeEditDropdown ? 'editOriginalMacros' : 'originalMacros';
+
+  if (!matches[index]) return;
+  const item = matches[index];
+
+  window[macrosKey] = {
+    kcal: item.kcal,
+    protein: item.protein,
+    fat: item.fat,
+    net_carbs: item.net_carbs,
+  };
+
+  document.getElementById(inputId).value = item.name;
+
+  if (!activeEditDropdown) {
+    document.getElementById('a-grams').value = 100;
+    document.getElementById('a-kcal').value = item.kcal;
+    document.getElementById('a-protein').value = item.protein;
+    document.getElementById('a-fat').value = item.fat;
+    document.getElementById('a-net_carbs').value = item.net_carbs;
+  }
+
+  foodSelectedId = item.id;
+  foodSelectedName = item.name;
+
+  if (activeEditDropdown) {
+    clearEditFoodDropdown();
+  } else {
+    clearFoodDropdown();
+  }
+}
+
+function recalcFromGrams() {
+  if (!originalMacros) return;
+  const grams = parseFloat(document.getElementById('a-grams').value) || 0;
+  const ratio = grams / 100;
+
+  document.getElementById('a-kcal').value = Math.round(originalMacros.kcal * ratio);
+  document.getElementById('a-protein').value = (originalMacros.protein * ratio).toFixed(1);
+  document.getElementById('a-fat').value = (originalMacros.fat * ratio).toFixed(1);
+  document.getElementById('a-net_carbs').value = (originalMacros.net_carbs * ratio).toFixed(1);
+}
+
+function recalcEditFromGrams() {
+  if (!editOriginalMacros) return;
+  const grams = parseFloat(document.getElementById('e-grams').value) || 0;
+  const ratio = grams / 100;
+
+  document.getElementById('e-kcal').value = Math.round(editOriginalMacros.kcal * ratio);
+  document.getElementById('e-protein').value = (editOriginalMacros.protein * ratio).toFixed(1);
+  document.getElementById('e-fat').value = (editOriginalMacros.fat * ratio).toFixed(1);
+  document.getElementById('e-net_carbs').value = (editOriginalMacros.net_carbs * ratio).toFixed(1);
+}
+
+function clearFoodDropdown() {
+  foodMatches = [];
+  foodSelectedId = null;
+  foodSelectedName = null;
+  foodDropdownIdx = -1;
+
+  const dd = document.getElementById('food-suggestions');
+  if (dd) dd.remove();
+}
+
+function onFoodBlur() {
+  setTimeout(() => {
+    const dd = document.getElementById('food-suggestions');
+    if (dd && !dd.matches(':hover') && document.activeElement.id !== 'a-name') {
+      clearFoodDropdown();
+    }
+  }, 150);
+}
+
+function onEditFoodInput() {
+  const term = document.getElementById('e-name').value.trim();
+  clearEditFoodDropdown();
+
+  if (!term || term.length < 2) return;
+
+  clearTimeout(foodDebounce);
+  foodDebounce = setTimeout(() => {
+    apiFetch('/api/foods?q=' + encodeURIComponent(term)).then(results => {
+      if (!results || !results.length) {
+        editFoodMatches = [];
+        return;
+      }
+      editFoodMatches = results;
+      activeEditDropdown = true;
+      renderFoodDropdown('e-name');
+    });
+  }, 300);
+}
+
+function onEditFoodBlur() {
+  setTimeout(() => {
+    const dd = document.getElementById('food-suggestions');
+    if (dd && !dd.matches(':hover') && document.activeElement.id !== 'e-name') {
+      clearEditFoodDropdown();
+    }
+  }, 150);
+}
+
+function clearEditFoodDropdown() {
+  editFoodMatches = [];
+  activeEditDropdown = false;
+  foodDropdownIdx = -1;
+
+  const dd = document.getElementById('food-suggestions');
+  if (dd) dd.remove();
 }
 
 // ===================== NAV =====================
@@ -463,15 +650,27 @@ async function removeMeal(id) {
 }
 
 let editingMealId = null;
+let editOriginalMacros = null;
 
 function openEditMeal(id, name, grams, kcal, protein, fat, net_carbs) {
   editingMealId = id;
+  closeModal('modal-day');
   document.getElementById('e-name').value = name;
   document.getElementById('e-grams').value = grams || '';
   document.getElementById('e-kcal').value = kcal || '';
   document.getElementById('e-protein').value = protein || '';
   document.getElementById('e-fat').value = fat || '';
   document.getElementById('e-net_carbs').value = net_carbs || '';
+  if (parseFloat(document.getElementById('e-grams').value) > 0) {
+    editOriginalMacros = {
+      kcal: kcal / (grams / 100),
+      protein: protein / (grams / 100),
+      fat: fat / (grams / 100),
+      net_carbs: net_carbs / (grams / 100),
+    };
+  } else {
+    editOriginalMacros = null;
+  }
   openModal('modal-edit-meal');
 }
 
@@ -509,11 +708,16 @@ async function addMeal() {
 
   if (!date || !name) { toast('Date and name required'); return; }
 
-  await apiFetch('/api/meals', {
+  const result = await apiFetch('/api/meals', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ date, name, grams, kcal, protein, fat, net_carbs }),
   });
+
+  if (!result || result.error) {
+    toast('Failed to add meal: ' + (result?.error || 'unknown error'));
+    return;
+  }
 
   document.getElementById('a-name').value = '';
   document.getElementById('a-grams').value = '';
@@ -521,6 +725,9 @@ async function addMeal() {
   document.getElementById('a-protein').value = '';
   document.getElementById('a-fat').value = '';
   document.getElementById('a-net_carbs').value = '';
+
+  clearFoodDropdown();
+  originalMacros = null;
 
   toast('Meal added ✓');
   showPage('dashboard');
