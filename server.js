@@ -188,25 +188,38 @@ app.get('/api/meals/:date', requireAuth, (req, res) => {
 });
 
 app.post('/api/meals', requireAuth, (req, res) => {
-  const { date, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs } = req.body;
-  if (!date) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
-  DB.prepare(`
-    INSERT INTO meals (date, user_id, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs)
-    VALUES (@date, @user_id, @name, @grams, @kcal, @protein, @fat, @carbs_total, @fiber, @net_carbs)
-  `).run({ date, user_id: req.user.id, name, grams, kcal, protein, fat, carbs_total: carbs_total || 0, fiber: fiber || 0, net_carbs: net_carbs || 0 });
+  try {
+    const { date, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs } = req.body;
+    if (!date) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
 
-  const totals = DB.prepare(`
-    SELECT COALESCE(SUM(kcal), 0) as kcal, COALESCE(SUM(protein), 0) as protein,
-           COALESCE(SUM(fat), 0) as fat, COALESCE(SUM(net_carbs), 0) as net_carbs
-    FROM meals WHERE date = @date AND user_id = @user_id
-  `).get({ date, user_id: req.user.id });
+    // 1. Ensure day row exists first (meals FK depends on it)
+    DB.prepare('INSERT OR REPLACE INTO days (date, user_id, kcal, protein, fat, net_carbs) VALUES (@date, @user_id, 0, 0, 0, 0)').run({
+      date, user_id: req.user.id
+    });
 
-  DB.prepare('INSERT OR REPLACE INTO days (date, user_id, kcal, protein, fat, net_carbs) VALUES (@date, @user_id, @kcal, @protein, @fat, @net_carbs)').run({
-    date, user_id: req.user.id,
-    kcal: totals.kcal, protein: totals.protein, fat: totals.fat, net_carbs: totals.net_carbs
-  });
+    // 2. Insert meal (now FK check will pass)
+    DB.prepare(`
+      INSERT INTO meals (date, user_id, name, grams, kcal, protein, fat, carbs_total, fiber, net_carbs)
+      VALUES (@date, @user_id, @name, @grams, @kcal, @protein, @fat, @carbs_total, @fiber, @net_carbs)
+    `).run({ date, user_id: req.user.id, name, grams, kcal, protein, fat, carbs_total: carbs_total || 0, fiber: fiber || 0, net_carbs: net_carbs || 0 });
 
-  res.json({ ok: true });
+    // 3. Recalculate day totals after meal is in the DB
+    const totals = DB.prepare(`
+      SELECT COALESCE(SUM(kcal), 0) as kcal, COALESCE(SUM(protein), 0) as protein,
+             COALESCE(SUM(fat), 0) as fat, COALESCE(SUM(net_carbs), 0) as net_carbs
+      FROM meals WHERE date = @date AND user_id = @user_id
+    `).get({ date, user_id: req.user.id });
+
+    DB.prepare('INSERT OR REPLACE INTO days (date, user_id, kcal, protein, fat, net_carbs) VALUES (@date, @user_id, @kcal, @protein, @fat, @net_carbs)').run({
+      date, user_id: req.user.id,
+      kcal: totals.kcal, protein: totals.protein, fat: totals.fat, net_carbs: totals.net_carbs
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('MEAL INSERT ERROR:', err.message, err.stack);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/meals/:id', requireAuth, (req, res) => {
@@ -252,6 +265,35 @@ app.delete('/api/meals/:id', requireAuth, (req, res) => {
     });
   }
   res.json({ ok: true });
+});
+
+app.get('/api/foods', requireAuth, (req, res) => {
+  const q = req.query.q;
+  if (!q || q.length < 2) return res.json([]);
+
+  const like = '%' + q + '%';
+  const rows = DB.prepare(`
+    SELECT rowid as id, product_name as name,
+           kcal_per_100g, protein_per_100g, fat_per_100g, net_carbs_per_100g
+    FROM food_db
+    WHERE product_name LIKE ?
+      AND kcal_per_100g > 0 AND protein_per_100g > 0 AND fat_per_100g > 0
+    ORDER BY
+      CASE WHEN LOWER(product_name) = LOWER(?) THEN 0 ELSE 1 END,
+      rowid
+    LIMIT 20
+  `).all(like, q);
+
+  const results = rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    kcal: r.kcal_per_100g,
+    protein: r.protein_per_100g,
+    fat: r.fat_per_100g,
+    net_carbs: r.net_carbs_per_100g,
+  }));
+
+  res.json(results);
 });
 
 app.get('/api/stats', requireAuth, (req, res) => {
